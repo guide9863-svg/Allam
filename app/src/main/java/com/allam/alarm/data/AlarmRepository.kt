@@ -3,6 +3,7 @@ package com.allam.alarm.data
 import android.content.Context
 import android.content.SharedPreferences
 import com.allam.alarm.alarm.AlarmScheduler
+import com.allam.alarm.core.ActiveRing
 import com.allam.alarm.core.Alarm
 import com.allam.alarm.core.AlarmCalculator
 import com.allam.alarm.core.AppData
@@ -114,15 +115,15 @@ object AlarmStore {
         AlarmScheduler.rescheduleAll(context)
     }
 
-    /** 알람이 울린 직후: 한 번 알람은 끄고, 지난 건너뛰기 날짜는 정리. */
-    fun onFired(context: Context, id: Int): Alarm? {
+    /** 알람이 울린 직후: 울린 회차를 기록하고, 한 번 알람은 끄고, 지난 건너뛰기 날짜는 정리. */
+    fun onFired(context: Context, id: Int, firedAt: Long): Alarm? {
         var result: Alarm? = null
         AlarmRepository.update(context) { d ->
             val today = LocalDate.now()
             d.copy(alarms = d.alarms.map {
                 if (it.id != id) it
                 else {
-                    val pruned = AlarmCalculator.pruneSkips(it, today)
+                    val pruned = AlarmCalculator.pruneSkips(it, today).copy(lastFiredAt = firedAt)
                     (if (it.repeat == RepeatRule.Once) pruned.copy(enabled = false) else pruned).also { a -> result = a }
                 }
             })
@@ -138,6 +139,10 @@ object AlarmStore {
 
     fun removeSnooze(context: Context, alarmId: Int) {
         AlarmRepository.update(context) { d -> d.copy(snoozes = d.snoozes.filterNot { it.alarmId == alarmId }) }
+    }
+
+    fun setActiveRing(context: Context, ring: ActiveRing?) {
+        AlarmRepository.update(context) { d -> d.copy(activeRing = ring) }
     }
 
     fun addLog(context: Context, log: WakeLog) {

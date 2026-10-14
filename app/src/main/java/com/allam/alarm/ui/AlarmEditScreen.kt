@@ -62,6 +62,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.IntentCompat
 import com.allam.alarm.alarm.AlarmScheduler
 import com.allam.alarm.alarm.AlarmSoundPlayer
+import com.allam.alarm.alarm.SensorAvailability
 import com.allam.alarm.core.Alarm
 import com.allam.alarm.core.AlarmCalculator
 import com.allam.alarm.core.RepeatRule
@@ -267,11 +268,13 @@ private fun ShiftRepeatPicker(schedule: ShiftSchedule, selected: Set<String>, on
 
 @Composable
 private fun WakeCheckSection(draft: Alarm, onChange: (Alarm) -> Unit) {
+    val context = LocalContext.current
+    val hardwareSteps = remember { SensorAvailability.of(context).hardwareSteps }
     val w = draft.wakeCheck
     Section("기상 확인 (움직여야 꺼짐)") {
         Text(
-            "알람이 울리면 휴대폰을 들고 걷거나 계속 움직여야 꺼집니다. " +
-                "'소리 끄고 움직이기'를 눌러도 ${w.stillTimeoutSec}초 동안 움직임이 없으면 다시 울립니다.",
+            "알람이 울리면 '소리 끄고 움직이기'를 누르고 휴대폰을 들고 걷거나 계속 움직여야 꺼집니다. " +
+                "${w.stillTimeoutSec}초 동안 움직임이 없으면 진행도가 0이 되고 다시 울립니다.",
             style = MaterialTheme.typography.bodySmall,
         )
         Spacer(Modifier.height(8.dp))
@@ -283,6 +286,14 @@ private fun WakeCheckSection(draft: Alarm, onChange: (Alarm) -> Unit) {
                     shape = SegmentedButtonDefaults.itemShape(i, WakeMode.entries.size),
                 ) { Text(m.title) }
             }
+        }
+        if (w.mode == WakeMode.STEPS_ONLY && !hardwareSteps) {
+            Text(
+                "이 휴대폰은 걸음 센서(또는 신체 활동 권한)가 없어 가속도로 걸음을 추정합니다. " +
+                    "엄격 모드여도 위아래로 흔들면 걸음으로 셀 수 있어요.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+            )
         }
         LabeledSlider("목표 걸음 수", "${w.targetSteps}걸음", w.targetSteps, 10..100, 5) {
             onChange(draft.copy(wakeCheck = w.copy(targetSteps = it)))

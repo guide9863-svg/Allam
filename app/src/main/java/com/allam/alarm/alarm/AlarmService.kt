@@ -1,5 +1,6 @@
 package com.allam.alarm.alarm
 
+import android.app.Notification
 import android.app.Service
 import android.content.Context
 import android.content.Intent
@@ -12,6 +13,7 @@ import android.os.PowerManager
 import android.os.SystemClock
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
+import com.allam.alarm.core.ActiveRing
 import com.allam.alarm.core.Alarm
 import com.allam.alarm.core.MotionAnalyzer
 import com.allam.alarm.core.SnoozeState
@@ -36,20 +38,27 @@ class AlarmService : Service() {
         const val ACTION_QUIET = "com.allam.alarm.action.QUIET"
         const val ACTION_SNOOZE = "com.allam.alarm.action.SNOOZE"
         const val ACTION_EMERGENCY = "com.allam.alarm.action.EMERGENCY"
+        const val EXTRA_RESUME = "resume"
 
         private const val TICK_MS = 500L
+
+        /** 감시 알람: 30초마다 "지금+90초"로 다시 맞춘다. 울림이 끊기면 최대 90초 뒤 다시 울린다. */
+        private const val WATCHDOG_REARM_MS = 30_000L
+        private const val WATCHDOG_DELAY_MS = 90_000L
 
         /** 걸음 센서가 이만큼 움직이는 동안 한 번도 응답하지 않으면 가속도 기반 걸음 추정으로 전환. */
         private const val HW_STEP_FALLBACK_ACTIVE_SEC = 60
 
-        fun start(context: Context, alarmId: Int, snoozeCount: Int, isTest: Boolean, triggerAt: Long) {
+        /** @return 서비스를 시작했으면 true. 백그라운드 시작이 막히면 false. */
+        fun start(context: Context, alarmId: Int, snoozeCount: Int, isTest: Boolean, triggerAt: Long, resume: Boolean = false): Boolean {
             val intent = Intent(context, AlarmService::class.java)
                 .setAction(ACTION_START)
                 .putExtra(AlarmScheduler.EXTRA_ALARM_ID, alarmId)
                 .putExtra(AlarmScheduler.EXTRA_SNOOZE_COUNT, snoozeCount)
                 .putExtra(AlarmScheduler.EXTRA_IS_TEST, isTest)
                 .putExtra(AlarmScheduler.EXTRA_TRIGGER_AT, triggerAt)
-            ContextCompat.startForegroundService(context, intent)
+                .putExtra(EXTRA_RESUME, resume)
+            return runCatching { ContextCompat.startForegroundService(context, intent) }.isSuccess
         }
 
         fun send(context: Context, action: String) {
@@ -73,35 +82,56 @@ class AlarmService : Service() {
     private val handler = Handler(Looper.getMainLooper())
     private var session: RingSession? = null
     private var cpuLock: PowerManager.WakeLock? = null
+    private var lastStartId = 0
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        lastStartId = startId
         when (intent?.action) {
             ACTION_START -> handleStart(intent)
             ACTION_QUIET -> session?.quiet()
             ACTION_SNOOZE -> session?.snooze()
             ACTION_EMERGENCY -> session?.emergency()
-            else -> if (session == null) stopSelf()
         }
-        if (session == null && intent?.action != ACTION_START) stopSelf()
+        // 울림이 없으면 정리. 같은 시점에 들어온 새 시작 요청이 있으면 stopSelf(startId)는 서비스를 멈추지 않는다.
+        if (session == null) stopSelf(startId)
         return START_NOT_STICKY
     }
 
     private fun handleStart(intent: Intent) {
-        val alarmId = intent.getIntExtra(AlarmScheduler.EXTRA_ALARM_ID, AlarmScheduler.TEST_ALARM_ID)
-        val snoozeCount = intent.getIntExtra(AlarmScheduler.EXTRA_SNOOZE_COUNT, 0)
-        val triggerAt = intent.getLongExtra(AlarmScheduler.EXTRA_TRIGGER_AT, 0L)
-        val alarm = AlarmRepository.get(this).alarm(alarmId) ?: testAlarm()
+        // 채널이 없으면 startForeground 가 실패하므로 한 번 더 보장 (중복 호출 안전)
+        Notifications.createChannels(this)
+        val requestedId = intent.getIntExtra(AlarmScheduler.EXTRA_ALARM_ID, AlarmScheduler.TEST_ALARM_ID)
+        val isTest = intent.getBooleanExtra(AlarmScheduler.EXTRA_IS_TEST, false)
+        val resume = intent.getBooleanExtra(EXTRA_RESUME, false)
+        val data = AlarmRepository.get(this)
+        val resumeFrom = if (resume) data.activeRing else null
+
+        val base = data.alarm(requestedId) ?: testAlarm()
+        // 미리 울려보기는 실제 알람의 스누즈·기록을 건드리지 않도록 테스트 id 로 돌린다
+        val alarm = if (isTest) base.copy(id = AlarmScheduler.TEST_ALARM_ID) else base
 
         // startForegroundService 후에는 반드시 몇 초 안에 startForeground 를 호출해야 한다.
         val title = alarm.label.ifBlank { "알람" } + " · " + timeText(alarm)
         startInForeground(Notifications.ringing(this, title, "일어나서 움직여야 꺼집니다!", showQuietAction = true))
+        Notifications.cancelFallbackRing(this)
 
-        if (session != null) return // 이미 다른 알람이 울리는 중: 하나로 합친다
+        if (session != null) return // 이미 울리는 중: 하나로 합친다
+        if (resume && resumeFrom == null) {
+            // 되살릴 울림이 없다 (그 사이 기상 확인됨)
+            finishSession()
+            return
+        }
 
         acquireCpuLock()
-        val s = RingSession(alarm, snoozeCount, triggerAt)
+        val s = RingSession(
+            alarm = alarm,
+            isTest = isTest,
+            snoozeCount = resumeFrom?.snoozesUsed ?: intent.getIntExtra(AlarmScheduler.EXTRA_SNOOZE_COUNT, 0),
+            triggerAt = resumeFrom?.triggerAt ?: intent.getLongExtra(AlarmScheduler.EXTRA_TRIGGER_AT, 0L),
+            resumeFrom = resumeFrom,
+        )
         session = s
         s.begin()
         launchRingScreen()
@@ -116,7 +146,7 @@ class AlarmService : Service() {
         }
     }
 
-    private fun startInForeground(notification: android.app.Notification) {
+    private fun startInForeground(notification: Notification) {
         val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK else 0
         ServiceCompat.startForeground(this, Notifications.RING_ID, notification, type)
     }
@@ -129,7 +159,7 @@ class AlarmService : Service() {
         }
     }
 
-    /** 화면을 켠다 (다시 울릴 때 꺼진 화면을 깨우기 위함). */
+    /** 화면을 켠다 (다시 울릴 때 꺼진 화면을 깨우기 위함, 일부 기기에서만 동작하는 보조 수단). */
     @Suppress("DEPRECATION")
     private fun wakeScreen() {
         runCatching {
@@ -160,11 +190,14 @@ class AlarmService : Service() {
         session = null
         cpuLock?.let { if (it.isHeld) it.release() }
         cpuLock = null
+        Notifications.cancelReRing(this)
         ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
-        stopSelf()
+        stopSelf(lastStartId)
     }
 
     override fun onDestroy() {
+        // 정상 종료가 아닌 경우(시스템이 서비스를 멈춤)에도 소리·센서는 정리하되,
+        // activeRing 과 감시 알람은 남겨 두어 기상 확인 전이면 다시 울리게 한다.
         session?.release()
         session = null
         handler.removeCallbacksAndMessages(null)
@@ -175,27 +208,54 @@ class AlarmService : Service() {
     /** 알람 한 번의 울림. */
     private inner class RingSession(
         private val alarm: Alarm,
+        private val isTest: Boolean,
         snoozeCount: Int,
         private val triggerAt: Long,
+        resumeFrom: ActiveRing?,
     ) {
         private val ctx = this@AlarmService
-        private val startMs = SystemClock.elapsedRealtime()
-        private val startWall = System.currentTimeMillis()
+        private val nowElapsed = SystemClock.elapsedRealtime()
+        private val startWall = resumeFrom?.startedAtWall ?: System.currentTimeMillis()
+
+        /** 재개된 울림이면 처음 울린 시각 기준으로 60분 제한을 이어서 센다. */
+        private val startMs = nowElapsed - (System.currentTimeMillis() - startWall).coerceAtLeast(0)
         private val check = alarm.wakeCheck
-        private val analyzer = MotionAnalyzer(check.stillTimeoutSec * 1000L, check.sensitivity, startMs)
+        private val analyzer = MotionAnalyzer(check.stillTimeoutSec * 1000L, check.sensitivity, nowElapsed)
         private val controller = WakeController(check, startMs, alarm.maxSnoozes, snoozeCount)
         private val monitor = MotionMonitor(ctx, analyzer)
         private val sound = AlarmSoundPlayer(ctx, alarm.sound, alarm.ringtoneUri)
-        private val volume = VolumeEnforcer(ctx)
+        private val volume = VolumeEnforcer(ctx, resumeFrom?.savedVolume)
         private val vibrator = AlarmVibrator(ctx)
         private val torch = TorchStrobe(ctx)
         private var lastPhase = WakePhase.RINGING
+        private var lastWatchdogArm = 0L
         private var released = false
 
         fun begin() {
             monitor.start()
             outputsOn()
+            saveActiveRing()
+            armWatchdog(SystemClock.elapsedRealtime())
             publish()
+        }
+
+        private fun saveActiveRing() {
+            AlarmStore.setActiveRing(
+                ctx,
+                ActiveRing(
+                    alarmId = alarm.id,
+                    isTest = isTest,
+                    startedAtWall = startWall,
+                    triggerAt = triggerAt,
+                    snoozesUsed = controller.snoozesUsed,
+                    savedVolume = volume.savedVolume,
+                ),
+            )
+        }
+
+        private fun armWatchdog(nowElapsed: Long) {
+            lastWatchdogArm = nowElapsed
+            AlarmScheduler.armWatchdog(ctx, System.currentTimeMillis() + WATCHDOG_DELAY_MS)
         }
 
         fun onTick() {
@@ -210,6 +270,7 @@ class AlarmService : Service() {
             if (phase != lastPhase) onPhaseChanged(lastPhase, phase)
             lastPhase = phase
             if (phase == WakePhase.RINGING && alarm.forceMaxVolume) volume.enforceMax()
+            if (now - lastWatchdogArm >= WATCHDOG_REARM_MS) armWatchdog(now)
             publish()
             if (controller.isFinished) complete()
         }
@@ -248,17 +309,14 @@ class AlarmService : Service() {
                 WakePhase.RINGING -> {
                     outputsOn()
                     if (from == WakePhase.QUIET) {
-                        // 다시 울림: 화면을 켜고 알림을 갱신해 알람 화면을 다시 띄운다
+                        // 다시 울림: 화면을 켜고 새 전체화면 알림으로 알람 화면을 다시 띄운다
                         launchRingScreen()
-                        Notifications.update(
-                            ctx,
-                            Notifications.RING_ID,
-                            Notifications.ringing(ctx, "다시 울립니다! 움직임이 멈췄어요", "일어나서 걸어야 꺼집니다", true),
-                        )
+                        Notifications.showReRing(ctx, "다시 울립니다! 움직임이 멈췄어요", "일어나서 걸어야 꺼집니다")
                     }
                 }
                 WakePhase.QUIET -> {
                     outputsOff()
+                    Notifications.cancelReRing(ctx)
                     Notifications.update(
                         ctx,
                         Notifications.RING_ID,
@@ -270,6 +328,8 @@ class AlarmService : Service() {
         }
 
         private fun outputsOn() {
+            // 진동·스피커 떨림이 '움직임'으로 세어지지 않도록 울리는 동안은 가속도·자이로를 쉰다 (걸음 센서는 계속)
+            monitor.suppressMotion = true
             if (alarm.forceMaxVolume) volume.enforceMax()
             sound.start()
             if (alarm.vibrate) vibrator.start()
@@ -280,6 +340,10 @@ class AlarmService : Service() {
             sound.pause()
             vibrator.stop()
             torch.stop()
+            if (monitor.suppressMotion) {
+                monitor.suppressMotion = false
+                analyzer.resyncFilters(SystemClock.elapsedRealtime())
+            }
         }
 
         private fun complete() {
@@ -303,6 +367,9 @@ class AlarmService : Service() {
                 )
             }
             if (controller.phase == WakePhase.TIMED_OUT) Notifications.showTimedOut(ctx, alarm.label)
+            // 정상 종료(기상/스누즈/시간초과/긴급해제): 감시 알람과 울림 기록 제거
+            AlarmScheduler.cancelWatchdog(ctx)
+            AlarmStore.setActiveRing(ctx, null)
             release()
             finishSession()
         }
@@ -331,7 +398,7 @@ class AlarmService : Service() {
                     motionSec = status.activeSeconds,
                     targetMotionSec = check.targetMotionSec,
                     progress = controller.progress(status),
-                    intensity = status.intensity,
+                    intensity = if (monitor.suppressMotion) 0f else status.intensity,
                     quietRemainingSec = controller.quietRemainingSec(status),
                     stillTimeoutSec = check.stillTimeoutSec,
                     snoozesLeft = controller.snoozesLeft,

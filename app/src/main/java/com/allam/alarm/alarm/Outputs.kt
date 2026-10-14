@@ -114,9 +114,12 @@ class AlarmSoundPlayer(
 }
 
 /** 알람 스트림 볼륨을 최대로 고정하고, 끝나면 원래대로 돌려놓는다. */
-class VolumeEnforcer(context: Context) {
+class VolumeEnforcer(context: Context, initialSaved: Int? = null) {
     private val audio: AudioManager = context.service()
-    private var saved: Int? = null
+    private var saved: Int? = initialSaved
+
+    /** 최대로 바꾸기 전의 원래 볼륨 (울림이 끊겨도 복구할 수 있게 저장). */
+    val savedVolume: Int? get() = saved
 
     fun enforceMax() {
         runCatching {
@@ -131,6 +134,13 @@ class VolumeEnforcer(context: Context) {
         val v = saved ?: return
         runCatching { audio.setStreamVolume(AudioManager.STREAM_ALARM, v, 0) }
         saved = null
+    }
+
+    companion object {
+        fun restoreTo(context: Context, volume: Int?) {
+            val v = volume ?: return
+            runCatching { context.service<AudioManager>().setStreamVolume(AudioManager.STREAM_ALARM, v, 0) }
+        }
     }
 }
 

@@ -27,12 +27,17 @@ object AlarmScheduler {
     const val EXTRA_IS_SNOOZE = "is_snooze"
     const val EXTRA_IS_TEST = "is_test"
     const val EXTRA_TRIGGER_AT = "trigger_at"
+    const val EXTRA_IS_WATCHDOG = "is_watchdog"
 
     /** 미리 울려보기에서 쓰는 기본 알람 id (저장되지 않음). */
     const val TEST_ALARM_ID = 0
 
     private const val SNOOZE_REQUEST_OFFSET = 1_000_000
     private const val TEST_REQUEST_CODE = 2_000_000
+    private const val WATCHDOG_REQUEST_CODE = 3_000_000
+
+    /** 재부팅 등으로 꺼져 있던 동안 놓친 알람은 이 시간 이내면 켜지자마자 울린다. */
+    private const val CATCH_UP_WINDOW_MS = 30 * 60 * 1000L
 
     /** 재부팅 등으로 놓친 스누즈는 이 시간 이내면 바로 울리고, 더 오래됐으면 버린다. */
     private const val STALE_SNOOZE_MS = 30 * 60 * 1000L
@@ -42,12 +47,26 @@ object AlarmScheduler {
     fun canScheduleExact(context: Context): Boolean =
         Build.VERSION.SDK_INT < Build.VERSION_CODES.S || alarmManager(context).canScheduleExactAlarms()
 
-    fun rescheduleAll(context: Context) {
+    /**
+     * 모든 알람을 다시 등록한다.
+     * @param catchUpMissed 재부팅 직후: 꺼져 있던 동안 지나간 회차(최근 30분 이내, 아직 안 울린 것)를 곧바로 울린다.
+     */
+    fun rescheduleAll(context: Context, catchUpMissed: Boolean = false) {
         val data = AlarmRepository.get(context)
         val now = ZonedDateTime.now()
-        for (alarm in data.alarms) schedule(context, alarm, data.schedule, now)
-
         val nowMs = System.currentTimeMillis()
+        for (alarm in data.alarms) {
+            if (catchUpMissed && alarm.enabled) {
+                val from = maxOf(nowMs - CATCH_UP_WINDOW_MS, alarm.lastFiredAt)
+                val missed = AlarmCalculator.nextTrigger(alarm, data.schedule, instantOf(from))
+                if (missed != null && !missed.isAfter(now)) {
+                    setAlarm(context, nowMs + 1_000, firePendingIntent(context, alarm.id, missed.toInstant().toEpochMilli()))
+                    continue
+                }
+            }
+            schedule(context, alarm, data.schedule, now)
+        }
+
         val (stale, live) = data.snoozes.partition { it.triggerAtMillis < nowMs - STALE_SNOOZE_MS }
         for (s in stale) AlarmStore.removeSnooze(context, s.alarmId)
         for (s in live) scheduleSnooze(context, s)
@@ -121,6 +140,28 @@ object AlarmScheduler {
         setAlarm(context, at, pi)
         return at
     }
+
+    /**
+     * 울리는 동안 30초마다 "90초 뒤"로 다시 맞춰 두는 감시 알람.
+     * 프로세스가 죽거나 전원을 껐다 켜서 울림이 끊기면 이 알람이 울림을 되살린다.
+     */
+    fun armWatchdog(context: Context, atMillis: Long) {
+        setAlarm(context, atMillis, watchdogPendingIntent(context))
+    }
+
+    fun cancelWatchdog(context: Context) {
+        alarmManager(context).cancel(watchdogPendingIntent(context))
+    }
+
+    private fun watchdogPendingIntent(context: Context): PendingIntent = PendingIntent.getBroadcast(
+        context,
+        WATCHDOG_REQUEST_CODE,
+        Intent(context, AlarmReceiver::class.java)
+            .setAction(ACTION_FIRE)
+            .setData(Uri.parse("allam://watchdog"))
+            .putExtra(EXTRA_IS_WATCHDOG, true),
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+    )
 
     private fun firePendingIntent(context: Context, alarmId: Int, triggerAt: Long): PendingIntent {
         val intent = Intent(context, AlarmReceiver::class.java)

@@ -75,6 +75,8 @@ data class Alarm(
     val snoozeMinutes: Int = 5,
     val maxSnoozes: Int = 2,
     val wakeCheck: WakeCheck = WakeCheck(),
+    /** 마지막으로 울린 회차의 예정 시각(ms). 꺼져 있던 동안 놓친 알람 판단용. */
+    val lastFiredAt: Long = 0,
 )
 
 /** 스누즈로 잠시 미뤄진 알람. 재부팅 후에도 복구할 수 있게 저장한다. */
@@ -83,6 +85,21 @@ data class SnoozeState(
     val alarmId: Int,
     val triggerAtMillis: Long,
     val snoozeCount: Int,
+)
+
+/**
+ * 지금 울리고 있는 알람. 전원 재시작·프로세스 종료로 울림이 끊겨도
+ * 감시 알람(watchdog)이 이 정보로 다시 울린다. 기상 확인 전까지는 지워지지 않는다.
+ */
+@Serializable
+data class ActiveRing(
+    val alarmId: Int,
+    val isTest: Boolean,
+    val startedAtWall: Long,
+    val triggerAt: Long,
+    val snoozesUsed: Int,
+    /** 최대 볼륨으로 바꾸기 전 원래 알람 볼륨 (복구용). */
+    val savedVolume: Int? = null,
 )
 
 @Serializable
@@ -114,6 +131,7 @@ data class AppData(
     val nextAlarmId: Int = 1,
     val snoozes: List<SnoozeState> = emptyList(),
     val logs: List<WakeLog> = emptyList(),
+    val activeRing: ActiveRing? = null,
 ) {
     fun alarm(id: Int): Alarm? = alarms.firstOrNull { it.id == id }
 

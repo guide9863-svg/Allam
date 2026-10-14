@@ -16,6 +16,8 @@ object Notifications {
     const val CHANNEL_RING = "ring"
     const val CHANNEL_INFO = "info"
     const val RING_ID = 1001
+    private const val RE_RING_ID = 1002
+    private const val FALLBACK_ID = 1003
     private const val SNOOZE_BASE = 2000
     private const val RESULT_ID = 3000
 
@@ -72,6 +74,65 @@ object Notifications {
                 }
             }
             .build()
+    }
+
+    /**
+     * 다시 울릴 때 별도의 전체화면 알림을 새로 띄운다.
+     * (같은 알림을 고치기만 하면 전체화면이 다시 뜨지 않아 홈으로 나간 경우 화면이 안 돌아온다)
+     */
+    fun showReRing(context: Context, title: String, text: String) {
+        val content = ringActivityIntent(context)
+        val n = NotificationCompat.Builder(context, CHANNEL_RING)
+            .setSmallIcon(R.drawable.ic_stat_alarm)
+            .setContentTitle(title)
+            .setContentText(text)
+            .setCategory(NotificationCompat.CATEGORY_ALARM)
+            .setPriority(NotificationCompat.PRIORITY_MAX)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .setOngoing(true)
+            .setContentIntent(content)
+            .setFullScreenIntent(content, true)
+            .build()
+        context.service<NotificationManager>().cancel(RE_RING_ID)
+        notify(context, RE_RING_ID, n)
+    }
+
+    fun cancelReRing(context: Context) {
+        context.service<NotificationManager>().cancel(RE_RING_ID)
+    }
+
+    /** 서비스를 바로 시작할 수 없을 때: 전체화면으로 울림 화면을 띄우고, 화면이 서비스를 시작한다. */
+    fun showFallbackRing(context: Context, alarmId: Int, snoozeCount: Int, isTest: Boolean, triggerAt: Long, resume: Boolean) {
+        val intent = Intent(context, RingActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            .putExtra(RingActivity.EXTRA_FALLBACK_START, true)
+            .putExtra(AlarmScheduler.EXTRA_ALARM_ID, alarmId)
+            .putExtra(AlarmScheduler.EXTRA_SNOOZE_COUNT, snoozeCount)
+            .putExtra(AlarmScheduler.EXTRA_IS_TEST, isTest)
+            .putExtra(AlarmScheduler.EXTRA_TRIGGER_AT, triggerAt)
+            .putExtra(AlarmService.EXTRA_RESUME, resume)
+        val pi = PendingIntent.getActivity(
+            context,
+            13,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        val n = NotificationCompat.Builder(context, CHANNEL_RING)
+            .setSmallIcon(R.drawable.ic_stat_alarm)
+            .setContentTitle("알람 시간이에요!")
+            .setContentText("눌러서 알람 화면 열기")
+            .setCategory(NotificationCompat.CATEGORY_ALARM)
+            .setPriority(NotificationCompat.PRIORITY_MAX)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .setAutoCancel(true)
+            .setContentIntent(pi)
+            .setFullScreenIntent(pi, true)
+            .build()
+        notify(context, FALLBACK_ID, n)
+    }
+
+    fun cancelFallbackRing(context: Context) {
+        context.service<NotificationManager>().cancel(FALLBACK_ID)
     }
 
     fun showSnooze(context: Context, alarmId: Int, label: String, timeText: String) {

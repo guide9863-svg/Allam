@@ -123,6 +123,7 @@ class AlarmCalculatorTest {
             nextAlarmId = 4,
             snoozes = listOf(SnoozeState(1, 123L, 1)),
             logs = listOf(WakeLog(1, "출근", 1L, 2L, WakeOutcome.STEPS, 30, 10, 0, 1)),
+            activeRing = ActiveRing(1, false, 100L, 90L, 1, 7),
         )
         val text = AppData.encode(data)
         assertEquals(data, AppData.decode(text))

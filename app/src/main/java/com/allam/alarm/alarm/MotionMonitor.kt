@@ -55,6 +55,12 @@ class MotionMonitor(context: Context, private val analyzer: MotionAnalyzer) : Se
         private set
     private var running = false
 
+    /**
+     * true 인 동안 가속도·자이로 값을 버린다. 알람 진동·스피커 떨림이 '움직임'으로 잘못 세어지는 것을 막기 위해
+     * 소리/진동이 나는 동안에는 켜 둔다 (하드웨어 걸음 감지는 계속 받는다).
+     */
+    var suppressMotion = false
+
     fun start() {
         if (running || sm == null) return
         running = true
@@ -80,8 +86,10 @@ class MotionMonitor(context: Context, private val analyzer: MotionAnalyzer) : Se
     override fun onSensorChanged(event: SensorEvent) {
         val now = SystemClock.elapsedRealtime()
         when (event.sensor.type) {
-            Sensor.TYPE_ACCELEROMETER -> analyzer.onAccelerometer(event.values[0], event.values[1], event.values[2], now)
-            Sensor.TYPE_GYROSCOPE -> analyzer.onGyroscope(event.values[0], event.values[1], event.values[2], now)
+            Sensor.TYPE_ACCELEROMETER ->
+                if (!suppressMotion) analyzer.onAccelerometer(event.values[0], event.values[1], event.values[2], now)
+            Sensor.TYPE_GYROSCOPE ->
+                if (!suppressMotion) analyzer.onGyroscope(event.values[0], event.values[1], event.values[2], now)
             Sensor.TYPE_STEP_DETECTOR -> {
                 hardwareStepEvents++
                 analyzer.onHardwareStep(now)

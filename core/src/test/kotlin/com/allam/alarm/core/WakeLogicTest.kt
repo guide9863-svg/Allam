@@ -134,6 +134,35 @@ class WakeLogicTest {
     }
 
     @Test
+    fun softwareSteps_ignoreShakingButCountWalking() {
+        val shaker = MotionAnalyzer(stillTimeoutMs = 20_000, sensitivity = 1, startMs = 0)
+        feedShaking(shaker, 0, 20_000)
+        assertTrue("shake steps=${shaker.tick(20_000).steps}", shaker.tick(20_000).steps <= 3)
+
+        val walker = MotionAnalyzer(stillTimeoutMs = 20_000, sensitivity = 1, startMs = 0)
+        feedWalking(walker, 0, 20_000)
+        assertTrue("walk steps=${walker.tick(20_000).steps}", walker.tick(20_000).steps >= 30)
+    }
+
+    @Test
+    fun resyncFilters_keepsProgressAndAvoidsSpike() {
+        val a = MotionAnalyzer(stillTimeoutMs = 20_000, sensitivity = 1, startMs = 0)
+        feedWalking(a, 0, 5_000)
+        val before = a.tick(5_000)
+        // 센서 입력이 끊긴 동안 휴대폰을 뒤집었다가 다시 받기 시작
+        a.resyncFilters(5_000)
+        var t = 5_000L
+        while (t < 8_000) {
+            a.onAccelerometer(0f, g, 0f, t) // 방향만 바뀐 정지 상태
+            a.onGyroscope(0f, 0f, 0f, t)
+            t += 20
+        }
+        val after = a.tick(8_000)
+        assertEquals(before.activeSeconds, after.activeSeconds)
+        assertEquals(before.steps, after.steps)
+    }
+
+    @Test
     fun motionMode_acceptsSustainedMovement() {
         val check = WakeCheck(mode = WakeMode.STEPS_OR_MOTION, targetSteps = 1000, targetMotionSec = 30)
         val a = MotionAnalyzer(check.stillTimeoutSec * 1000L, check.sensitivity, 0).apply { hardwareSteps = true }

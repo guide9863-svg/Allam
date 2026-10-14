@@ -1,5 +1,6 @@
 package com.allam.alarm.ui
 
+import android.content.Intent
 import android.os.Build
 import android.os.Bundle
 import android.view.KeyEvent
@@ -51,7 +52,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.allam.alarm.alarm.AlarmScheduler
 import com.allam.alarm.alarm.AlarmService
+import com.allam.alarm.alarm.Notifications
 import com.allam.alarm.alarm.RingState
 import com.allam.alarm.alarm.RingUiState
 import com.allam.alarm.core.MathChallenge
@@ -66,8 +69,35 @@ import java.time.format.DateTimeFormatter
 
 /** 잠금화면 위에 뜨는 알람 화면. 뒤로가기·볼륨 버튼으로는 끌 수 없다. */
 class RingActivity : ComponentActivity() {
+    companion object {
+        /** 서비스를 백그라운드에서 시작하지 못했을 때: 이 화면이 열리면서 대신 시작한다. */
+        const val EXTRA_FALLBACK_START = "fallback_start"
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        startServiceIfFallback(intent)
+    }
+
+    private fun startServiceIfFallback(intent: Intent?) {
+        if (intent == null || !intent.getBooleanExtra(EXTRA_FALLBACK_START, false)) return
+        intent.removeExtra(EXTRA_FALLBACK_START)
+        val current = RingState.state.value
+        if (current != null && !current.isFinished) return
+        AlarmService.start(
+            this,
+            intent.getIntExtra(AlarmScheduler.EXTRA_ALARM_ID, AlarmScheduler.TEST_ALARM_ID),
+            intent.getIntExtra(AlarmScheduler.EXTRA_SNOOZE_COUNT, 0),
+            intent.getBooleanExtra(AlarmScheduler.EXTRA_IS_TEST, false),
+            intent.getLongExtra(AlarmScheduler.EXTRA_TRIGGER_AT, 0L),
+            intent.getBooleanExtra(AlarmService.EXTRA_RESUME, false),
+        )
+        Notifications.cancelFallbackRing(this)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        startServiceIfFallback(intent)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
             setShowWhenLocked(true)
             setTurnScreenOn(true)
@@ -113,7 +143,7 @@ private fun RingScreen(onClose: () -> Unit) {
 
     LaunchedEffect(s == null) {
         if (s == null) {
-            delay(1500)
+            delay(4000)
             if (RingState.state.value == null) onClose()
         }
     }
@@ -225,8 +255,8 @@ private fun ColumnScope.ActiveContent(s: RingUiState, onEmergency: () -> Unit) {
     Text(
         when {
             !s.hasMotionSensor -> "움직임 센서가 없어 긴급 해제로만 끌 수 있어요"
-            ringing && s.reRings > 0 -> "움직임이 멈춰서 다시 울려요 (${s.reRings}회째)"
-            ringing -> "휴대폰을 들고 걸어야 꺼집니다"
+            ringing && s.reRings > 0 -> "움직임이 멈춰서 다시 울려요 (${s.reRings}회째)\n'소리 끄고 움직이기'를 누르고 걸으세요"
+            ringing -> "'소리 끄고 움직이기'를 누르고\n휴대폰을 들고 걸으세요"
             else -> "멈추면 ${s.quietRemainingSec}초 뒤 다시 울립니다"
         },
         color = Color.White.copy(alpha = 0.9f),
@@ -245,7 +275,23 @@ private fun ColumnScope.ActiveContent(s: RingUiState, onEmergency: () -> Unit) {
         ProgressLine("연속 움직임", "${s.motionSec} / ${s.targetMotionSec}초", s.motionSec.toFloat() / s.targetMotionSec.coerceAtLeast(1))
     }
     Spacer(Modifier.height(8.dp))
-    ProgressLine("지금 움직임 세기", if (s.intensity >= 1f) "감지됨 ✓" else "약함", s.intensity, Color(0xFF38BDF8))
+    ProgressLine(
+        "지금 움직임 세기",
+        when {
+            ringing -> "소리를 끄면 측정"
+            s.intensity >= 1f -> "감지됨 ✓"
+            else -> "약함"
+        },
+        s.intensity,
+        Color(0xFF38BDF8),
+    )
+    if (ringing) {
+        Text(
+            "울리는 동안에는 진동 때문에 걸음 센서만 셉니다",
+            color = Color.White.copy(alpha = 0.6f),
+            fontSize = 12.sp,
+        )
+    }
 
     Spacer(Modifier.weight(1f))
 

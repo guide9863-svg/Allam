@@ -83,6 +83,10 @@ class MotionAnalyzer(
     private var stepRearmed = true
     private var lastSoftStepMs = Long.MIN_VALUE / 2
 
+    // 흔들기 판별용 자이로 세기 (지수 이동 평균)
+    private var gyroPowerEma = 0.0
+    private var lastGyroMs = -1L
+
     fun onAccelerometer(x: Float, y: Float, z: Float, tMs: Long) {
         advanceBucket(tMs)
         val dt = if (lastAccMs < 0) 0.02 else ((tMs - lastAccMs).coerceIn(1, 500)) / 1000.0
@@ -107,8 +111,31 @@ class MotionAnalyzer(
 
     fun onGyroscope(x: Float, y: Float, z: Float, tMs: Long) {
         advanceBucket(tMs)
-        gyroSumSq += (x * x + y * y + z * z).toDouble()
+        val power = (x * x + y * y + z * z).toDouble()
+        gyroSumSq += power
         gyroN++
+        val dt = if (lastGyroMs < 0) 0.02 else ((tMs - lastGyroMs).coerceIn(1, 500)) / 1000.0
+        lastGyroMs = tMs
+        val a = lowPassFactor(dt, SHAKE_TAU_SEC)
+        gyroPowerEma = a * gyroPowerEma + (1 - a) * power
+    }
+
+    /** 걸음과 달리 손으로 흔들면 휴대폰이 크게 회전한다. 그때의 가속도 봉우리는 걸음으로 세지 않는다. */
+    val isShaking: Boolean get() = sqrt(gyroPowerEma) >= SHAKE_GYRO_RAD_S
+
+    /**
+     * 센서 입력을 한동안 무시했다가 다시 받을 때(알람 진동·소리가 꺼진 직후) 필터를 새로 시작한다.
+     * 진행도(걸음/움직임)와 정지 타이머는 건드리지 않는다.
+     */
+    fun resyncFilters(nowMs: Long) {
+        gravityInit = false
+        magInit = false
+        lastAccMs = -1
+        lastGyroMs = -1
+        stepRearmed = true
+        bucketStart = nowMs
+        accSumSq = 0.0; accN = 0
+        gyroSumSq = 0.0; gyroN = 0
     }
 
     fun onHardwareStep(tMs: Long) {
@@ -150,7 +177,7 @@ class MotionAnalyzer(
         if (stepRearmed && d > stepHigh && tMs - lastSoftStepMs >= MIN_STEP_INTERVAL_MS) {
             stepRearmed = false
             lastSoftStepMs = tMs
-            registerStep(tMs)
+            if (!isShaking) registerStep(tMs)
         } else if (!stepRearmed && d < stepLow) {
             stepRearmed = true
         }
@@ -198,5 +225,9 @@ class MotionAnalyzer(
         const val STEP_HIGH = 1.3
         const val STEP_LOW = 0.3
         const val MIN_STEP_INTERVAL_MS = 280L
+
+        /** 걷는 중 손에 든 휴대폰의 회전은 보통 1 rad/s 이하, 손으로 흔들면 2.5 rad/s 이상. */
+        const val SHAKE_GYRO_RAD_S = 2.5
+        const val SHAKE_TAU_SEC = 0.5
     }
 }
