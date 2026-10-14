@@ -51,6 +51,12 @@ android {
     packaging {
         resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
     }
+    lint {
+        // 매니페스트에 적힌 클래스 누락, 하위 API 기기에서의 크래시를 빌드 단계에서 잡는다
+        checkOnly += setOf("MissingClass", "NewApi", "InlinedApi", "ForegroundServicePermission", "ForegroundServiceType")
+        abortOnError = true
+        warningsAsErrors = false
+    }
 }
 
 dependencies {

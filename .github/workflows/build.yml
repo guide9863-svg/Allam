@@ -30,6 +30,9 @@ jobs:
       - name: Unit tests (core logic)
         run: ./gradlew --no-daemon :core:test
 
+      - name: Lint (missing classes, API level crashes)
+        run: ./gradlew --no-daemon :app:lintRelease
+
       - name: Build APK
         run: ./gradlew --no-daemon :app:assembleRelease
 
