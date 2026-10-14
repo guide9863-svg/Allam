@@ -1,0 +1,63 @@
+name: Build APK
+
+on:
+  push:
+    branches: ['**']
+    paths-ignore: ['**.md']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Unit tests (core logic)
+        run: ./gradlew --no-daemon :core:test
+
+      - name: Build APK
+        run: ./gradlew --no-daemon :app:assembleRelease
+
+      - name: Collect APK
+        run: |
+          mkdir -p dist
+          cp app/build/outputs/apk/release/app-release.apk "dist/Allam-1.0.${{ github.run_number }}.apk"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Allam-apk-${{ github.run_number }}
+          path: dist/*.apk
+
+      - name: Publish GitHub Release (phone download)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="v1.0.${{ github.run_number }}"
+          cat > notes.md <<'NOTES'
+          ## 휴대폰에 설치하기
+          1. 휴대폰에서 이 페이지를 열고 아래 **Assets** 의 `Allam-…apk` 를 누르세요.
+          2. "출처를 알 수 없는 앱 설치" 허용 화면이 나오면 허용하세요.
+          3. 설치 후 앱을 열고 **설정 탭**의 권한을 모두 ✓ 로 만들어 주세요.
+
+          이전 버전이 설치돼 있으면 그대로 업데이트됩니다 (알람·교대표 유지).
+          NOTES
+          gh release create "$TAG" dist/*.apk \
+            --target "${{ github.sha }}" \
+            --title "Allam 기상알람 $TAG" \
+            --notes-file notes.md \
+            --latest
