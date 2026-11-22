@@ -12,6 +12,8 @@ data class RingUiState(
     val label: String,
     val timeText: String,
     val phase: WakePhase,
+    /** false 면 일반 알람: 움직임 확인 없이 '끄기' 버튼으로 끈다. */
+    val wakeCheckEnabled: Boolean,
     val mode: WakeMode,
     val steps: Int,
     val targetSteps: Int,

@@ -38,6 +38,9 @@ class AlarmService : Service() {
         const val ACTION_QUIET = "com.allam.alarm.action.QUIET"
         const val ACTION_SNOOZE = "com.allam.alarm.action.SNOOZE"
         const val ACTION_EMERGENCY = "com.allam.alarm.action.EMERGENCY"
+
+        /** 기상 확인을 끈 일반 알람의 "끄기". 기상 확인을 쓰는 알람에서는 무시된다. */
+        const val ACTION_DISMISS = "com.allam.alarm.action.DISMISS"
         const val EXTRA_RESUME = "resume"
 
         private const val TICK_MS = 500L
@@ -93,6 +96,7 @@ class AlarmService : Service() {
             ACTION_QUIET -> session?.quiet()
             ACTION_SNOOZE -> session?.snooze()
             ACTION_EMERGENCY -> session?.emergency()
+            ACTION_DISMISS -> session?.dismiss()
         }
         // 울림이 없으면 정리. 같은 시점에 들어온 새 시작 요청이 있으면 stopSelf(startId)는 서비스를 멈추지 않는다.
         if (session == null) stopSelf(startId)
@@ -114,7 +118,16 @@ class AlarmService : Service() {
 
         // startForegroundService 후에는 반드시 몇 초 안에 startForeground 를 호출해야 한다.
         val title = alarm.label.ifBlank { "알람" } + " · " + timeText(alarm)
-        startInForeground(Notifications.ringing(this, title, "일어나서 움직여야 꺼집니다!", showQuietAction = true))
+        val wakeCheck = alarm.wakeCheck.enabled
+        startInForeground(
+            Notifications.ringing(
+                this,
+                title,
+                if (wakeCheck) "일어나서 움직여야 꺼집니다!" else "알람 시간이에요!",
+                showQuietAction = wakeCheck,
+                showDismissAction = !wakeCheck,
+            ),
+        )
         Notifications.cancelFallbackRing(this)
 
         if (session != null) return // 이미 울리는 중: 하나로 합친다
@@ -232,7 +245,8 @@ class AlarmService : Service() {
         private var released = false
 
         fun begin() {
-            monitor.start()
+            // 일반 알람(기상 확인 끔)은 센서를 쓰지 않는다
+            if (check.enabled) monitor.start()
             outputsOn()
             saveActiveRing()
             armWatchdog(SystemClock.elapsedRealtime())
@@ -294,6 +308,13 @@ class AlarmService : Service() {
             Notifications.showSnooze(ctx, alarm.id, alarm.label, atText)
             lastPhase = WakePhase.SNOOZED
             publish(snoozeUntil = at)
+            complete()
+        }
+
+        fun dismiss() {
+            if (!controller.dismiss(SystemClock.elapsedRealtime())) return
+            lastPhase = controller.phase
+            publish()
             complete()
         }
 
@@ -366,7 +387,7 @@ class AlarmService : Service() {
                     ),
                 )
             }
-            if (controller.phase == WakePhase.TIMED_OUT) Notifications.showTimedOut(ctx, alarm.label)
+            if (controller.phase == WakePhase.TIMED_OUT) Notifications.showTimedOut(ctx, alarm.label, check.enabled)
             // 정상 종료(기상/스누즈/시간초과/긴급해제): 감시 알람과 울림 기록 제거
             AlarmScheduler.cancelWatchdog(ctx)
             AlarmStore.setActiveRing(ctx, null)
@@ -392,6 +413,7 @@ class AlarmService : Service() {
                     label = alarm.label,
                     timeText = timeText(alarm),
                     phase = controller.phase,
+                    wakeCheckEnabled = check.enabled,
                     mode = check.mode,
                     steps = status.steps,
                     targetSteps = check.targetSteps,

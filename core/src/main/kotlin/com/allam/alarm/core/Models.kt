@@ -26,11 +26,13 @@ enum class WakeMode(val title: String) {
 /**
  * 움직임으로 기상을 확인하는 조건.
  *
+ * @property enabled false 면 일반 알람처럼 동작한다: 센서를 쓰지 않고 '끄기' 버튼으로 바로 꺼진다.
  * @property stillTimeoutSec 이 시간 동안 움직임이 없으면 진행도가 0으로 초기화되고, 소리를 잠시 꺼둔 상태였다면 다시 울린다.
  * @property sensitivity 0 = 둔감(더 크게 움직여야 함), 1 = 보통, 2 = 민감
  */
 @Serializable
 data class WakeCheck(
+    val enabled: Boolean = true,
     val mode: WakeMode = WakeMode.STEPS_OR_MOTION,
     val targetSteps: Int = 30,
     val targetMotionSec: Int = 30,
@@ -107,6 +109,7 @@ enum class WakeOutcome(val title: String) {
     STEPS("걸음으로 기상 확인"),
     MOTION("움직임으로 기상 확인"),
     EMERGENCY("긴급 해제"),
+    DISMISSED("끄기 버튼으로 끔 (기상 확인 없음)"),
     TIMED_OUT("시간 초과 (기상 미확인)"),
 }
 

@@ -22,6 +22,8 @@ enum class WakePhase {
  *
  * RINGING --(소리 끄고 움직이기)--> QUIET --(stillTimeout 동안 정지)--> RINGING (반복)
  * RINGING/QUIET --(걸음 또는 움직임 목표 달성)--> AWAKE
+ *
+ * 기상 확인을 끈 알람(check.enabled = false)은 일반 알람이다: RINGING --(끄기)--> AWAKE
  */
 class WakeController(
     val check: WakeCheck,
@@ -46,6 +48,7 @@ class WakeController(
     val isSoundOn: Boolean get() = phase == WakePhase.RINGING
 
     fun goalMethod(status: MotionStatus): WakeOutcome? = when {
+        !check.enabled -> null
         status.steps >= check.targetSteps -> WakeOutcome.STEPS
         check.mode == WakeMode.STEPS_OR_MOTION && status.activeSeconds >= check.targetMotionSec -> WakeOutcome.MOTION
         else -> null
@@ -53,6 +56,7 @@ class WakeController(
 
     /** 0~1 진행도: 걸음/움직임 중 더 많이 채운 쪽. */
     fun progress(status: MotionStatus): Float {
+        if (!check.enabled) return 0f
         val stepP = status.steps.toFloat() / check.targetSteps.coerceAtLeast(1)
         val motionP = if (check.mode == WakeMode.STEPS_OR_MOTION) {
             status.activeSeconds.toFloat() / check.targetMotionSec.coerceAtLeast(1)
@@ -80,7 +84,7 @@ class WakeController(
 
     /** "소리 끄고 움직이기". 울리는 중일 때만 가능. */
     fun requestQuiet(): Boolean {
-        if (phase != WakePhase.RINGING) return false
+        if (!check.enabled || phase != WakePhase.RINGING) return false
         phase = WakePhase.QUIET
         return true
     }
@@ -90,6 +94,13 @@ class WakeController(
         snoozesUsed++
         phase = WakePhase.SNOOZED
         endedAtMs = nowMs
+        return true
+    }
+
+    /** 일반 알람의 "끄기". 기상 확인을 쓰는 알람에서는 거부한다. */
+    fun dismiss(nowMs: Long): Boolean {
+        if (check.enabled || isFinished) return false
+        finish(WakePhase.AWAKE, WakeOutcome.DISMISSED, nowMs)
         return true
     }
 

@@ -198,6 +198,31 @@ class WakeLogicTest {
     }
 
     @Test
+    fun wakeCheckDisabled_behavesLikePlainAlarm() {
+        val c = WakeController(WakeCheck(enabled = false), startMs = 0, maxSnoozes = 1, snoozesUsed = 0)
+        // 센서 값이 목표를 넘어도 움직임으로는 꺼지지 않고, '소리 끄고 움직이기'도 없다
+        val moved = MotionStatus(999, 999, 0, 1f, true, 999)
+        assertEquals(WakePhase.RINGING, c.update(moved, 1000))
+        assertEquals(0f, c.progress(moved))
+        assertFalse(c.requestQuiet())
+        assertTrue(c.dismiss(2000))
+        assertEquals(WakePhase.AWAKE, c.phase)
+        assertEquals(WakeOutcome.DISMISSED, c.outcome)
+        assertEquals(2000, c.endedAtMs)
+
+        // 스누즈와 60분 안전장치는 그대로
+        val c2 = WakeController(WakeCheck(enabled = false), startMs = 0, maxSnoozes = 1, snoozesUsed = 0)
+        assertTrue(c2.requestSnooze(5))
+        val c3 = WakeController(WakeCheck(enabled = false), startMs = 0, maxSnoozes = 0, snoozesUsed = 0)
+        assertEquals(WakePhase.TIMED_OUT, c3.update(moved, WakeController.DEFAULT_MAX_RING_MS))
+
+        // 기상 확인을 쓰는 알람은 '끄기'로 끌 수 없다
+        val strict = WakeController(WakeCheck(), startMs = 0, maxSnoozes = 0, snoozesUsed = 0)
+        assertFalse(strict.dismiss(10))
+        assertEquals(WakePhase.RINGING, strict.phase)
+    }
+
+    @Test
     fun quietCountdown() {
         val c = WakeController(WakeCheck(stillTimeoutSec = 20), 0, 0, 0)
         assertEquals(20, c.quietRemainingSec(MotionStatus(0, 0, 0, 0f, false, 0)))

@@ -198,10 +198,11 @@ private fun RingScreen(onClose: () -> Unit) {
         Spacer(Modifier.height(32.dp))
 
         when (s.phase) {
-            WakePhase.RINGING, WakePhase.QUIET -> ActiveContent(s, onEmergency = { showEmergency = true })
+            WakePhase.RINGING, WakePhase.QUIET ->
+                if (s.wakeCheckEnabled) ActiveContent(s, onEmergency = { showEmergency = true }) else PlainContent(s)
             WakePhase.AWAKE -> FinishedContent(
-                title = "기상 완료! 좋은 아침이에요 ☀️",
-                body = buildString {
+                title = if (s.outcome == WakeOutcome.DISMISSED) "알람을 껐어요" else "기상 완료! 좋은 아침이에요 ☀️",
+                body = if (s.outcome == WakeOutcome.DISMISSED) "" else buildString {
                     val mins = ((s.endedAtWall - s.startedAtWall) / 60_000).coerceAtLeast(0)
                     append(if (mins == 0L) "1분도 안 걸렸어요" else "${mins}분 만에 일어났어요")
                     when (s.outcome) {
@@ -223,7 +224,7 @@ private fun RingScreen(onClose: () -> Unit) {
             )
             WakePhase.TIMED_OUT -> FinishedContent(
                 title = "알람을 멈췄어요",
-                body = "60분 동안 기상이 확인되지 않았습니다.",
+                body = if (s.wakeCheckEnabled) "60분 동안 기상이 확인되지 않았습니다." else "60분 동안 끄지 않아 자동으로 멈췄습니다.",
                 onClose = onClose,
             )
         }
@@ -313,6 +314,36 @@ private fun ColumnScope.ActiveContent(s: RingUiState, onEmergency: () -> Unit) {
     }
     TextButton(onClick = onEmergency) {
         Text("긴급 해제 (계산 문제)", color = Color.White.copy(alpha = 0.6f))
+    }
+}
+
+/** 기상 확인을 끈 일반 알람: 움직임 없이 '끄기'로 바로 끈다. */
+@Composable
+private fun ColumnScope.PlainContent(s: RingUiState) {
+    val context = LocalContext.current
+    Text(
+        "알람 시간이에요!",
+        color = Color.White,
+        fontSize = 40.sp,
+        fontWeight = FontWeight.Black,
+        textAlign = TextAlign.Center,
+    )
+
+    Spacer(Modifier.weight(1f))
+
+    Button(
+        onClick = { AlarmService.send(context, AlarmService.ACTION_DISMISS) },
+        colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = Color(0xFFB91C1C)),
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(72.dp),
+    ) { Text("끄기", fontSize = 22.sp, fontWeight = FontWeight.Bold) }
+    Spacer(Modifier.height(12.dp))
+    if (s.snoozesLeft > 0) {
+        OutlinedButton(
+            onClick = { AlarmService.send(context, AlarmService.ACTION_SNOOZE) },
+            modifier = Modifier.fillMaxWidth(),
+        ) { Text("${s.snoozeMinutes}분 뒤 다시 울리기 (남은 ${s.snoozesLeft}회)", color = Color.White) }
     }
 }
 

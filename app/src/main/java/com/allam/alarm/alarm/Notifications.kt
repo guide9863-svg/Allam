@@ -53,7 +53,13 @@ object Notifications {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
 
-    fun ringing(context: Context, title: String, text: String, showQuietAction: Boolean): Notification {
+    fun ringing(
+        context: Context,
+        title: String,
+        text: String,
+        showQuietAction: Boolean,
+        showDismissAction: Boolean = false,
+    ): Notification {
         val content = ringActivityIntent(context)
         return NotificationCompat.Builder(context, CHANNEL_RING)
             .setSmallIcon(R.drawable.ic_stat_alarm)
@@ -71,6 +77,9 @@ object Notifications {
             .apply {
                 if (showQuietAction) {
                     addAction(0, "소리 끄고 움직이기", serviceAction(context, AlarmService.ACTION_QUIET, 11))
+                }
+                if (showDismissAction) {
+                    addAction(0, "끄기", serviceAction(context, AlarmService.ACTION_DISMISS, 14))
                 }
             }
             .build()
@@ -151,10 +160,10 @@ object Notifications {
         context.service<NotificationManager>().cancel(SNOOZE_BASE + alarmId)
     }
 
-    fun showTimedOut(context: Context, label: String) {
+    fun showTimedOut(context: Context, label: String, wakeCheck: Boolean = true) {
         val n = NotificationCompat.Builder(context, CHANNEL_INFO)
             .setSmallIcon(R.drawable.ic_stat_alarm)
-            .setContentTitle("60분 동안 울렸지만 기상이 확인되지 않았어요")
+            .setContentTitle(if (wakeCheck) "60분 동안 울렸지만 기상이 확인되지 않았어요" else "60분 동안 울렸지만 끄지 않았어요")
             .setContentText(label.ifBlank { "알람" } + " · 알람을 멈췄습니다")
             .setAutoCancel(true)
             .setContentIntent(mainIntent(context))
