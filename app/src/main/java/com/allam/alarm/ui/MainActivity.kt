@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
@@ -52,7 +53,7 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-private enum class Tab(val title: String) { ALARMS("알람"), SHIFT("교대표"), SETTINGS("설정") }
+private enum class Tab(val title: String) { ALARMS("알람"), SHIFT("교대표"), SOUNDS("알람음"), SETTINGS("설정") }
 
 @Composable
 private fun AllamRoot() {
@@ -105,6 +106,7 @@ private fun AllamRoot() {
                                 when (t) {
                                     Tab.ALARMS -> Icons.Filled.Notifications
                                     Tab.SHIFT -> Icons.Filled.DateRange
+                                    Tab.SOUNDS -> Icons.Filled.PlayArrow
                                     Tab.SETTINGS -> Icons.Filled.Settings
                                 },
                                 contentDescription = t.title,
@@ -137,6 +139,7 @@ private fun AllamRoot() {
                 onOpenShift = { tab = Tab.SHIFT },
             )
             Tab.SHIFT -> ShiftScreen(data = data, modifier = modifier)
+            Tab.SOUNDS -> SoundScreen(data = data, modifier = modifier)
             Tab.SETTINGS -> SettingsScreen(
                 data = data,
                 permissions = permissions,

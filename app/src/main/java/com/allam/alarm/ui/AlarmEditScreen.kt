@@ -69,6 +69,8 @@ import com.allam.alarm.core.RepeatRule
 import com.allam.alarm.core.ShiftSchedule
 import com.allam.alarm.core.SoundType
 import com.allam.alarm.core.WakeMode
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.allam.alarm.data.AlarmRepository
 import com.allam.alarm.data.AlarmStore
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -328,6 +330,7 @@ private fun SoundSection(draft: Alarm, onChange: (Alarm) -> Unit) {
     DisposableEffect(Unit) {
         onDispose { previewPlayer?.release() }
     }
+    val customSounds = AlarmRepository.data.collectAsStateWithLifecycle().value.customSounds
 
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         val data = result.data ?: return@rememberLauncherForActivityResult
@@ -342,22 +345,50 @@ private fun SoundSection(draft: Alarm, onChange: (Alarm) -> Unit) {
                     .fillMaxWidth()
                     .selectable(
                         selected = draft.sound == type,
-                        onClick = { onChange(draft.copy(sound = type)) },
+                        enabled = type != SoundType.CUSTOM || customSounds.isNotEmpty(),
+                        onClick = {
+                            onChange(
+                                if (type == SoundType.CUSTOM) {
+                                    val keep = customSounds.firstOrNull { it.id == draft.customSoundId } ?: customSounds.first()
+                                    draft.copy(sound = type, customSoundId = keep.id)
+                                } else draft.copy(sound = type),
+                            )
+                        },
                         role = Role.RadioButton,
                     )
                     .padding(vertical = 2.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                RadioButton(selected = draft.sound == type, onClick = null)
+                RadioButton(
+                    selected = draft.sound == type,
+                    onClick = null,
+                    enabled = type != SoundType.CUSTOM || customSounds.isNotEmpty(),
+                )
                 Spacer(Modifier.width(8.dp))
                 Text(type.title)
+            }
+        }
+        if (customSounds.isEmpty()) {
+            Text(
+                "내 음악을 쓰려면 아래 '알람음' 탭에서 음악 파일을 불러와 먼저 편집·저장하세요.",
+                style = MaterialTheme.typography.bodySmall,
+            )
+        } else if (draft.sound == SoundType.CUSTOM) {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                customSounds.forEach { s ->
+                    FilterChip(
+                        selected = draft.customSoundId == s.id,
+                        onClick = { onChange(draft.copy(customSoundId = s.id)) },
+                        label = { Text(s.name) },
+                    )
+                }
             }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton(onClick = {
                 previewJob?.cancel()
                 previewPlayer?.release()
-                val p = AlarmSoundPlayer(context, draft.sound, draft.ringtoneUri)
+                val p = AlarmSoundPlayer(context, draft.sound, draft.ringtoneUri, draft.customSoundId)
                 previewPlayer = p
                 p.start()
                 previewJob = scope.launch {

@@ -15,7 +15,7 @@ object ToneSynth {
         SoundType.SIREN -> siren()
         SoundType.FIRE_BELL -> fireBell()
         SoundType.CHAOS -> chaos()
-        SoundType.SYSTEM -> siren()
+        SoundType.SYSTEM, SoundType.CUSTOM -> siren()
     }
 
     /** 600Hz ↔ 1800Hz 를 0.5초마다 오르내리는 사각파 사이렌 (2초 루프). */

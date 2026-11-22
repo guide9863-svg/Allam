@@ -6,10 +6,13 @@ import com.allam.alarm.alarm.AlarmScheduler
 import com.allam.alarm.core.ActiveRing
 import com.allam.alarm.core.Alarm
 import com.allam.alarm.core.AlarmCalculator
+import com.allam.alarm.audio.SoundFiles
 import com.allam.alarm.core.AppData
+import com.allam.alarm.core.CustomSound
 import com.allam.alarm.core.RepeatRule
 import com.allam.alarm.core.ShiftSchedule
 import com.allam.alarm.core.SnoozeState
+import com.allam.alarm.core.SoundType
 import com.allam.alarm.core.WakeLog
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -147,6 +150,36 @@ object AlarmStore {
 
     fun addLog(context: Context, log: WakeLog) {
         AlarmRepository.update(context) { d -> d.copy(logs = (listOf(log) + d.logs).take(AppData.MAX_LOGS)) }
+    }
+
+    fun addCustomSound(context: Context, sound: CustomSound) {
+        AlarmRepository.update(context) { d -> d.copy(customSounds = d.customSounds.filterNot { it.id == sound.id } + sound) }
+    }
+
+    /** 알람음을 지운다. 이 소리를 쓰던 알람은 사이렌으로 되돌린다. */
+    fun deleteCustomSound(context: Context, id: String) {
+        AlarmRepository.update(context) { d ->
+            d.copy(
+                customSounds = d.customSounds.filterNot { it.id == id },
+                alarms = d.alarms.map {
+                    if (it.sound == SoundType.CUSTOM && it.customSoundId == id) it.copy(sound = SoundType.SIREN, customSoundId = null) else it
+                },
+            )
+        }
+        SoundFiles.file(context, id).delete()
+    }
+
+    /** 고른 알람들만 이 알람음을 쓰게 한다. 선택에서 빠진 알람은 사이렌으로 되돌린다. */
+    fun applyCustomSound(context: Context, id: String, alarmIds: Set<Int>) {
+        AlarmRepository.update(context) { d ->
+            d.copy(alarms = d.alarms.map {
+                when {
+                    it.id in alarmIds -> it.copy(sound = SoundType.CUSTOM, customSoundId = id)
+                    it.sound == SoundType.CUSTOM && it.customSoundId == id -> it.copy(sound = SoundType.SIREN, customSoundId = null)
+                    else -> it
+                }
+            })
+        }
     }
 
     fun clearLogs(context: Context) {

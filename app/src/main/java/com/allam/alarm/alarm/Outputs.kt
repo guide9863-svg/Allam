@@ -18,7 +18,9 @@ import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
 import com.allam.alarm.core.SoundType
+import com.allam.alarm.audio.SoundFiles
 import com.allam.alarm.core.ToneSynth
+import java.io.FileInputStream
 
 private val alarmAttributes: AudioAttributes = AudioAttributes.Builder()
     .setUsage(AudioAttributes.USAGE_ALARM)
@@ -33,6 +35,7 @@ class AlarmSoundPlayer(
     private val context: Context,
     private val sound: SoundType,
     private val ringtoneUri: String?,
+    private val customSoundId: String? = null,
 ) {
     private var track: AudioTrack? = null
     private var media: MediaPlayer? = null
@@ -51,7 +54,13 @@ class AlarmSoundPlayer(
             isPlaying = true
             return
         }
-        isPlaying = startSynth(if (sound == SoundType.SYSTEM) SoundType.SIREN else sound)
+        if (sound == SoundType.CUSTOM && startCustom()) {
+            isPlaying = true
+            return
+        }
+        // 파일이 없거나 재생에 실패하면 반드시 울리도록 사이렌으로 대체
+        val synth = if (sound == SoundType.SYSTEM || sound == SoundType.CUSTOM) SoundType.SIREN else sound
+        isPlaying = startSynth(synth)
     }
 
     fun pause() {
@@ -83,6 +92,24 @@ class AlarmSoundPlayer(
         player.prepare()
         player.start()
         media = player
+        true
+    }.getOrElse {
+        media?.release()
+        media = null
+        false
+    }
+
+    /** 알람음 탭에서 편집해 저장한 WAV 파일을 반복 재생한다. */
+    private fun startCustom(): Boolean = runCatching {
+        val file = SoundFiles.file(context, customSoundId ?: return false)
+        if (!file.isFile || file.length() <= 44) return false
+        val player = MediaPlayer()
+        media = player
+        player.setAudioAttributes(alarmAttributes)
+        FileInputStream(file).use { player.setDataSource(it.fd) }
+        player.isLooping = true
+        player.prepare()
+        player.start()
         true
     }.getOrElse {
         media?.release()

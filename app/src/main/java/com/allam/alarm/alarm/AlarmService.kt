@@ -223,7 +223,7 @@ class AlarmService : Service() {
         private val analyzer = MotionAnalyzer(check.stillTimeoutSec * 1000L, check.sensitivity, nowElapsed)
         private val controller = WakeController(check, startMs, alarm.maxSnoozes, snoozeCount)
         private val monitor = MotionMonitor(ctx, analyzer)
-        private val sound = AlarmSoundPlayer(ctx, alarm.sound, alarm.ringtoneUri)
+        private val sound = AlarmSoundPlayer(ctx, alarm.sound, alarm.ringtoneUri, alarm.customSoundId)
         private val volume = VolumeEnforcer(ctx, resumeFrom?.savedVolume)
         private val vibrator = AlarmVibrator(ctx)
         private val torch = TorchStrobe(ctx)

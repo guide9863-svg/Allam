@@ -4,13 +4,17 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
-/** 알람 소리 종류. SYSTEM 을 제외하면 모두 앱이 직접 합성하는 소리라 잠금 해제 전(Direct Boot)에도 울린다. */
+/**
+ * 알람 소리 종류. SYSTEM 을 제외하면 잠금 해제 전(Direct Boot)에도 울린다.
+ * (합성음은 앱이 직접 만들고, CUSTOM 은 편집한 파일을 device-protected 저장소에 둔다.)
+ */
 @Serializable
 enum class SoundType(val title: String) {
     SIREN("초강력 사이렌"),
     FIRE_BELL("화재경보 비상벨"),
     CHAOS("혼돈의 불협화음"),
     SYSTEM("휴대폰 기본 알람음"),
+    CUSTOM("내 음악 (알람음 탭에서 편집)"),
 }
 
 /** 기상 확인 방식. */
@@ -69,6 +73,8 @@ data class Alarm(
     val skipEpochDays: Set<Long> = emptySet(),
     val sound: SoundType = SoundType.SIREN,
     val ringtoneUri: String? = null,
+    /** sound 가 CUSTOM 일 때 재생할 [CustomSound.id]. */
+    val customSoundId: String? = null,
     val vibrate: Boolean = true,
     val flash: Boolean = false,
     val forceMaxVolume: Boolean = true,
@@ -132,7 +138,10 @@ data class AppData(
     val snoozes: List<SnoozeState> = emptyList(),
     val logs: List<WakeLog> = emptyList(),
     val activeRing: ActiveRing? = null,
+    val customSounds: List<CustomSound> = emptyList(),
 ) {
+    fun customSound(id: String?): CustomSound? = customSounds.firstOrNull { it.id == id }
+
     fun alarm(id: Int): Alarm? = alarms.firstOrNull { it.id == id }
 
     companion object {

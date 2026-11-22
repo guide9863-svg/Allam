@@ -35,6 +35,13 @@
 - 내장 합성음: 초강력 사이렌 / 3.1kHz 화재경보 비상벨 / 불협화음 (또는 휴대폰 알람음)
 - 강한 진동, 카메라 플래시 깜빡임, 빨갛게 번쩍이는 화면
 
+### 내 음악으로 알람음 만들기 (알람음 탭)
+- 휴대폰의 mp3·m4a·flac·ogg·wav 파일을 불러와 파형을 보며 원하는 구간(1초~3분)만 잘라 저장
+- 시작·끝 0.1초 단위 미세 조정, 구간 듣기 / 끝 3초 듣기
+- 음량: 원본 / 최대 음량(깨지지 않는 한도) / 초강력(일부러 찢어지게), 페이드 인·아웃
+- 저장한 알람음은 "알람에 적용" 또는 알람 편집의 소리 선택에서 고름. 울리는 동안 반복 재생
+- 앱 안에 따로 저장하므로 원본 파일을 지워도, 재부팅 후 잠금 해제 전에도 울림 (재생 실패 시 사이렌으로 대체)
+
 ### 움직여야 꺼지는 기상 확인
 ```
 울림 ──[소리 끄고 움직이기]──▶ 조용 (센서 감시)
@@ -64,10 +71,13 @@ core/   순수 Kotlin 로직 (JUnit 테스트)
   MotionAnalyzer    센서 값 → 걸음 수, 연속 움직임 초, 정지 시간
   WakeController    울림 → 조용 → 다시 울림 → 기상 상태 기계
   ToneSynth         알람음 PCM 합성
+  AudioClip         음악 자르기 계산 (WAV 헤더, 증폭·페이드, 구간 제한)
 app/    안드로이드 앱 (Jetpack Compose)
   alarm/AlarmScheduler  AlarmManager.setAlarmClock 등록
   alarm/AlarmService    울림 포그라운드 서비스 (소리·진동·플래시·센서)
   ui/RingActivity       잠금화면 위 알람 화면
+  audio/AudioClips      음악 파일 디코딩(MediaCodec) → 구간 잘라 WAV 저장
+  ui/SoundScreen        알람음 탭 (불러오기·편집·알람에 적용)
 ```
 
 로컬 빌드: `./gradlew :core:test :app:assembleRelease` (Android SDK 필요)
